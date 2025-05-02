@@ -49,14 +49,15 @@
 
 </template>
 <script lang="ts" setup>
-import { h, ref } from 'vue'
+import { computed, h, ref } from 'vue'
 import { HomeOutlined } from '@ant-design/icons-vue'
 import { type MenuProps, message } from 'ant-design-vue'
 import { useRouter } from 'vue-router'
 import { useLoginUserStore } from '@/stores/useLoginUserStore.ts'
 import { userLogoutUsingPost } from '@/api/userController.ts'
 const loginUserStore = useLoginUserStore()
-const items = ref<MenuProps['items']>([
+//未过滤的菜单列表
+const originItems = [
   {
     key: '/',
     icon: () => h(HomeOutlined),
@@ -68,12 +69,28 @@ const items = ref<MenuProps['items']>([
     label: '用户管理',
     title: '用户管理',
   },
-  {
-    key: 'others',
-    label: h('a', { href: 'https://www.codefather.cn', target: '_blank' }, '编程导航'),
-    title: '编程导航',
-  },
-])
+
+]
+
+
+//根据权限过滤菜单
+const filterMenu = (menus =[] as MenuProps['items']) => {
+  return menus?.filter((menu) => {
+    // 先将 menu.key 转换为字符串类型，再调用 startsWith 方法
+    if (typeof menu?.key === 'string' && menu.key.startsWith('/admin')) {
+      const loginUser = loginUserStore.loginUser
+      if (!loginUser || loginUser.userRole !== 'admin' ){
+        return false
+      }
+    }
+    return true
+  })
+}
+
+const items =computed(() =>
+  filterMenu(originItems)
+)
+
 const router = useRouter()
 // 当前要高亮的菜单项
 const current = ref<string[]>([])
