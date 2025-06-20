@@ -29,7 +29,7 @@ public class UserController {
     private UserService userService;
 
     /**
-     * 用户注册
+     * 用户注册1
      */
     @PostMapping("/register")
     public BaseResponse<Long> userRegister(@RequestBody UserRegisterRequest userRegisterRequest) {
