@@ -35,14 +35,14 @@
             </template>
           </a-dropdown>
         </div>
-        <div class="user-login-status">
-          <div v-if="loginUserStore.loginUser.id">
-            {{ loginUserStore.loginUser.userName ?? '无名' }}
-          </div>
-          <div v-else>
-            <a-button type="primary" href="/user/login">登录</a-button>
-          </div>
-        </div>
+<!--        <div class="user-login-status">-->
+<!--          <div v-if="loginUserStore.loginUser.id">-->
+<!--            {{ loginUserStore.loginUser.userName ?? '无名' }}-->
+<!--          </div>-->
+<!--          <div v-else>-->
+<!--            <a-button type="primary" href="/user/login">登录</a-button>-->
+<!--          </div>-->
+<!--        </div>-->
       </a-col>
     </a-row>
   </div>

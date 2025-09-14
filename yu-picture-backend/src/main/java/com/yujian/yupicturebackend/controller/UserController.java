@@ -111,9 +111,15 @@ public class UserController {
      */
     @PostMapping("/delete")
     @AuthCheck(mustRole = UserConstant.ADMIN_ROLE)
-    public BaseResponse<Boolean> deleteUser(@RequestBody DeleteRequest deleteRequest) {
+    public BaseResponse<Boolean> deleteUser(@RequestBody DeleteRequest deleteRequest,HttpServletRequest request) {
         if (deleteRequest == null || deleteRequest.getId() <= 0) {
             throw new BusinessException(ErrorCode.PARAMS_ERROR);
+        }
+        // 获取当前登录的管理员用户
+        User loginUser = userService.getLoginUser(request);
+        // 检查是否是删除自己的账户
+        if (loginUser.getId().equals(deleteRequest.getId())) {
+            throw new BusinessException(ErrorCode.FORBIDDEN_ERROR, "不允许删除自己的账户，请联系其他管理员操作");
         }
         boolean b = userService.removeById(deleteRequest.getId());
         return ResultUtils.success(b);

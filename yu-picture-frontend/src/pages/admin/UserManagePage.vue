@@ -96,7 +96,7 @@ const doDelete = async (id: number) => {
     // 刷新数据
     await fetchData()
   } else {
-    message.error('删除失败')
+    message.error(res.data.message)
   }
 }
 
