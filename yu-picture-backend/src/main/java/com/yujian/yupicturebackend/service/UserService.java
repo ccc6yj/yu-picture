@@ -3,6 +3,7 @@ package com.yujian.yupicturebackend.service;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.service.IService;
 import com.yujian.yupicturebackend.domain.User;
+import com.yujian.yupicturebackend.model.dto.user.UserProfileUpdateRequest;
 import com.yujian.yupicturebackend.model.dto.user.UserQueryRequest;
 import com.yujian.yupicturebackend.model.vo.LoginUserVO;
 import com.yujian.yupicturebackend.model.vo.UserVO;
@@ -70,4 +71,13 @@ public interface UserService extends IService<User> {
 
 
     QueryWrapper<User> getQueryWrapper(UserQueryRequest userQueryRequest);
+
+    /**
+     * 更新个人信息
+     *
+     * @param userProfileUpdateRequest 个人信息更新请求
+     * @param request                   HTTP请求
+     * @return 是否更新成功
+     */
+    boolean updateUserProfile(UserProfileUpdateRequest userProfileUpdateRequest, HttpServletRequest request);
 }

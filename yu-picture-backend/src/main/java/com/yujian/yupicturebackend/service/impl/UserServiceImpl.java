@@ -1,6 +1,7 @@
 package com.yujian.yupicturebackend.service.impl;
 
 import cn.hutool.core.collection.CollUtil;
+import cn.hutool.core.util.IdUtil;
 import cn.hutool.core.util.ObjUtil;
 import cn.hutool.core.util.StrUtil;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
@@ -9,6 +10,7 @@ import com.yujian.yupicturebackend.domain.User;
 import com.yujian.yupicturebackend.exception.BusinessException;
 import com.yujian.yupicturebackend.exception.ErrorCode;
 import com.yujian.yupicturebackend.mapper.UserMapper;
+import com.yujian.yupicturebackend.model.dto.user.UserProfileUpdateRequest;
 import com.yujian.yupicturebackend.model.dto.user.UserQueryRequest;
 import com.yujian.yupicturebackend.model.enums.UserRoleEnum;
 import com.yujian.yupicturebackend.model.vo.LoginUserVO;
@@ -16,13 +18,16 @@ import com.yujian.yupicturebackend.model.vo.UserVO;
 import com.yujian.yupicturebackend.service.UserService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.BeanUtils;
+import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.util.DigestUtils;
 
+import javax.annotation.Resource;
 import javax.servlet.http.HttpServletRequest;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 import static com.yujian.yupicturebackend.constant.UserConstant.USER_LOGIN_STATE;
@@ -35,6 +40,13 @@ import static com.yujian.yupicturebackend.constant.UserConstant.USER_LOGIN_STATE
 @Service
 @Slf4j
 public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements UserService {
+    
+    @Resource
+    private RedisTemplate<String, Object> redisTemplate;
+    
+    private static final String USER_LOGIN_TOKEN_KEY = "user:login:token:";
+    private static final long TOKEN_EXPIRE_TIME = 30;
+    private static final TimeUnit TOKEN_EXPIRE_UNIT = TimeUnit.MINUTES;
 
     @Override
     public long userRegister(String userAccount, String userPassword, String checkPassword) {
@@ -104,24 +116,58 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
             log.info("user login failed, userAccount cannot match userPassword");
             throw new BusinessException(ErrorCode.PARAMS_ERROR, "用户不存在或密码错误");
         }
-        // 3. 记录用户的登录态
-        request.getSession().setAttribute(USER_LOGIN_STATE, user);
-        return this.getLoginUserVO(user);
+        
+        // 3. 单点登录：清除该用户之前的登录token
+        String userIdPrefix = USER_LOGIN_TOKEN_KEY + user.getId() + ":*";
+        redisTemplate.delete(redisTemplate.keys(userIdPrefix));
+        
+        // 4. 生成新的登录token并存储到Redis
+        String token = IdUtil.simpleUUID();
+        String tokenKey = USER_LOGIN_TOKEN_KEY + user.getId() + ":" + token;
+        redisTemplate.opsForValue().set(tokenKey, user, TOKEN_EXPIRE_TIME, TOKEN_EXPIRE_UNIT);
+        
+        // 5. 将token存储到session中（前端可以从响应头或cookie中获取）
+        request.getSession().setAttribute(USER_LOGIN_STATE, token);
+        
+        // 6. 返回用户信息，同时设置token
+        LoginUserVO loginUserVO = this.getLoginUserVO(user);
+        loginUserVO.setToken(token);
+        return loginUserVO;
     }
     @Override
     public User getLoginUser(HttpServletRequest request) {
-        // 先判断是否已登录
-        Object userObj = request.getSession().getAttribute(USER_LOGIN_STATE);
-        User currentUser = (User) userObj;
-        if (currentUser == null || currentUser.getId() == null) {
-            throw new BusinessException(ErrorCode.NOT_LOGIN_ERROR);
+        // 从session中获取token
+        Object tokenObj = request.getSession().getAttribute(USER_LOGIN_STATE);
+        String token = (String) tokenObj;
+        
+        // 从请求头中获取token（支持前端通过Header传递token）
+        if (StrUtil.isBlank(token)) {
+            token = request.getHeader("Authorization");
+            if (StrUtil.isNotBlank(token) && token.startsWith("Bearer ")) {
+                token = token.substring(7);
+            }
         }
-        // 从数据库查询（追求性能的话可以注释，直接返回上述结果）
-        long userId = currentUser.getId();
-        currentUser = this.getById(userId);
+        
+        if (StrUtil.isBlank(token)) {
+            throw new BusinessException(ErrorCode.NOT_LOGIN_ERROR, "未登录");
+        }
+        
+        // 从Redis中查找token对应的用户信息
+        String tokenKeyPattern = USER_LOGIN_TOKEN_KEY + "*:" + token;
+        java.util.Set<String> keys = redisTemplate.keys(tokenKeyPattern);
+        if (keys == null || keys.isEmpty()) {
+            throw new BusinessException(ErrorCode.NOT_LOGIN_ERROR, "登录已过期，请重新登录");
+        }
+        
+        String tokenKey = keys.iterator().next();
+        User currentUser = (User) redisTemplate.opsForValue().get(tokenKey);
         if (currentUser == null) {
-            throw new BusinessException(ErrorCode.NOT_LOGIN_ERROR);
+            throw new BusinessException(ErrorCode.NOT_LOGIN_ERROR, "登录已过期，请重新登录");
         }
+        
+        // 延长token过期时间
+        redisTemplate.expire(tokenKey, TOKEN_EXPIRE_TIME, TOKEN_EXPIRE_UNIT);
+        
         return currentUser;
     }
 
@@ -137,12 +183,30 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
 
     @Override
     public boolean userLogout(HttpServletRequest request) {
-        // 先判断是否已登录
-        Object userObj = request.getSession().getAttribute(USER_LOGIN_STATE);
-        if (userObj == null) {
+        // 从session中获取token
+        Object tokenObj = request.getSession().getAttribute(USER_LOGIN_STATE);
+        String token = (String) tokenObj;
+        
+        // 从请求头中获取token（支持前端通过Header传递token）
+        if (StrUtil.isBlank(token)) {
+            token = request.getHeader("Authorization");
+            if (StrUtil.isNotBlank(token) && token.startsWith("Bearer ")) {
+                token = token.substring(7);
+            }
+        }
+        
+        if (StrUtil.isBlank(token)) {
             throw new BusinessException(ErrorCode.OPERATION_ERROR, "未登录");
         }
-        // 移除登录态
+        
+        // 从Redis中删除token
+        String tokenKeyPattern = USER_LOGIN_TOKEN_KEY + "*:" + token;
+        java.util.Set<String> keys = redisTemplate.keys(tokenKeyPattern);
+        if (keys != null && !keys.isEmpty()) {
+            redisTemplate.delete(keys);
+        }
+        
+        // 移除session中的登录态
         request.getSession().removeAttribute(USER_LOGIN_STATE);
         return true;
     }
@@ -185,6 +249,86 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         queryWrapper.like(StrUtil.isNotBlank(userProfile), "userProfile", userProfile);
         queryWrapper.orderBy(StrUtil.isNotEmpty(sortField), sortOrder.equals("ascend"), sortField);
         return queryWrapper;
+    }
+
+    @Override
+    public boolean updateUserProfile(UserProfileUpdateRequest userProfileUpdateRequest, HttpServletRequest request) {
+        if (userProfileUpdateRequest == null) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "请求参数为空");
+        }
+        
+        // 获取当前登录用户
+        User loginUser = getLoginUser(request);
+        Long userId = loginUser.getId();
+        
+        // 校验参数
+        String userName = userProfileUpdateRequest.getUserName();
+        String userAvatar = userProfileUpdateRequest.getUserAvatar();
+        String userProfile = userProfileUpdateRequest.getUserProfile();
+        
+        // 校验用户名
+        if (StrUtil.isNotBlank(userName)) {
+            if (userName.length() > 20) {
+                throw new BusinessException(ErrorCode.PARAMS_ERROR, "用户昵称过长");
+            }
+        }
+        
+        // 校验简介
+        if (StrUtil.isNotBlank(userProfile)) {
+            if (userProfile.length() > 200) {
+                throw new BusinessException(ErrorCode.PARAMS_ERROR, "用户简介过长");
+            }
+        }
+        
+        // 校验头像URL
+        if (StrUtil.isNotBlank(userAvatar)) {
+            if (userAvatar.length() > 500) {
+                throw new BusinessException(ErrorCode.PARAMS_ERROR, "头像URL过长");
+            }
+        }
+        
+        // 更新用户信息
+        User updateUser = new User();
+        updateUser.setId(userId);
+        if (StrUtil.isNotBlank(userName)) {
+            updateUser.setUserName(userName);
+        }
+        if (StrUtil.isNotBlank(userAvatar)) {
+            updateUser.setUserAvatar(userAvatar);
+        }
+        if (StrUtil.isNotBlank(userProfile)) {
+            updateUser.setUserProfile(userProfile);
+        }
+        
+        boolean result = this.updateById(updateUser);
+        if (!result) {
+            throw new BusinessException(ErrorCode.OPERATION_ERROR, "更新个人信息失败");
+        }
+        
+        // 更新Redis中的用户信息缓存
+        String token = (String) request.getSession().getAttribute(USER_LOGIN_STATE);
+        if (StrUtil.isBlank(token)) {
+            token = request.getHeader("Authorization");
+            if (StrUtil.isNotBlank(token) && token.startsWith("Bearer ")) {
+                token = token.substring(7);
+            }
+        }
+        
+        if (StrUtil.isNotBlank(token)) {
+            String tokenKeyPattern = USER_LOGIN_TOKEN_KEY + userId + ":*";
+            java.util.Set<String> keys = redisTemplate.keys(tokenKeyPattern);
+            if (keys != null && !keys.isEmpty()) {
+                String tokenKey = keys.iterator().next();
+                // 获取更新后的用户信息
+                User updatedUser = this.getById(userId);
+                if (updatedUser != null) {
+                    // 更新Redis中的用户信息
+                    redisTemplate.opsForValue().set(tokenKey, updatedUser, TOKEN_EXPIRE_TIME, TOKEN_EXPIRE_UNIT);
+                }
+            }
+        }
+        
+        return true;
     }
 
 }

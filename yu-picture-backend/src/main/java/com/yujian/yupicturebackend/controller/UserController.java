@@ -13,6 +13,7 @@ import com.yujian.yupicturebackend.constant.UserConstant;
 import com.yujian.yupicturebackend.model.dto.user.*;
 import com.yujian.yupicturebackend.model.vo.LoginUserVO;
 import com.yujian.yupicturebackend.model.vo.UserVO;
+import org.springframework.web.multipart.MultipartFile;
 import com.yujian.yupicturebackend.service.UserService;
 import org.springframework.beans.BeanUtils;
 import org.springframework.web.bind.annotation.*;
@@ -158,6 +159,71 @@ public class UserController {
         List<UserVO> userVOList = userService.getUserVOList(userPage.getRecords());
         userVOPage.setRecords(userVOList);
         return ResultUtils.success(userVOPage);
+    }
+
+    /**
+     * 更新个人信息
+     */
+    @PostMapping("/update/profile")
+    public BaseResponse<Boolean> updateUserProfile(@RequestBody UserProfileUpdateRequest userProfileUpdateRequest, HttpServletRequest request) {
+        ThrowUtils.throwIf(userProfileUpdateRequest == null, ErrorCode.PARAMS_ERROR);
+        boolean result = userService.updateUserProfile(userProfileUpdateRequest, request);
+        return ResultUtils.success(result);
+    }
+
+    /**
+     * 上传用户头像
+     */
+    @PostMapping("/upload/avatar")
+    public BaseResponse<String> uploadAvatar(@RequestParam("file") MultipartFile file, HttpServletRequest request) {
+        ThrowUtils.throwIf(file == null || file.isEmpty(), ErrorCode.PARAMS_ERROR, "文件不能为空");
+        
+        // 校验文件类型
+        String contentType = file.getContentType();
+        if (contentType == null || !contentType.startsWith("image/")) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "仅支持图片文件");
+        }
+        
+        // 校验文件大小（2MB）
+        if (file.getSize() > 2 * 1024 * 1024) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "文件大小不能超过2MB");
+        }
+        
+        // 获取当前登录用户
+        User loginUser = userService.getLoginUser(request);
+        
+        try {
+            // 生成文件名
+            String originalFilename = file.getOriginalFilename();
+            String fileExtension = "";
+            if (originalFilename != null && originalFilename.contains(".")) {
+                fileExtension = originalFilename.substring(originalFilename.lastIndexOf("."));
+            }
+            String fileName = "avatar_" + loginUser.getId() + "_" + System.currentTimeMillis() + fileExtension;
+            
+            // 创建上传目录
+            String uploadDir = System.getProperty("user.dir") + "/uploads/avatars/";
+            java.io.File dir = new java.io.File(uploadDir);
+            if (!dir.exists()) {
+                dir.mkdirs();
+            }
+            
+            // 保存文件
+            java.io.File destFile = new java.io.File(dir, fileName);
+            file.transferTo(destFile);
+            
+            // 返回文件访问URL
+            String avatarUrl = "/uploads/avatars/" + fileName;
+            
+            // 更新用户头像URL
+            UserProfileUpdateRequest updateRequest = new UserProfileUpdateRequest();
+            updateRequest.setUserAvatar(avatarUrl);
+            userService.updateUserProfile(updateRequest, request);
+            
+            return ResultUtils.success(avatarUrl);
+        } catch (Exception e) {
+            throw new BusinessException(ErrorCode.OPERATION_ERROR, "文件上传失败：" + e.getMessage());
+        }
     }
 
 }
