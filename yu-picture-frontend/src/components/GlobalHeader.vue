@@ -22,11 +22,20 @@
         <div v-if="loginUserStore.loginUser.id">
           <a-dropdown>
             <ASpace>
-              <a-avatar :src="loginUserStore.loginUser.userAvatar" />
+              <a-avatar 
+                :src="getAvatarUrl(loginUserStore.loginUser.userAvatar)" 
+                @click="goToProfile"
+                style="cursor: pointer"
+                :title="'点击进入个人中心'"
+              />
               {{ loginUserStore.loginUser.userName ?? '无名' }}
             </ASpace>
             <template #overlay>
               <a-menu>
+                <a-menu-item @click="goToProfile">
+                  <UserOutlined />
+                  个人中心
+                </a-menu-item>
                 <a-menu-item @click="doLogout">
                   <LogoutOutlined />
                   退出登录
@@ -35,14 +44,14 @@
             </template>
           </a-dropdown>
         </div>
-<!--        <div class="user-login-status">-->
-<!--          <div v-if="loginUserStore.loginUser.id">-->
-<!--            {{ loginUserStore.loginUser.userName ?? '无名' }}-->
-<!--          </div>-->
-<!--          <div v-else>-->
-<!--            <a-button type="primary" href="/user/login">登录</a-button>-->
-<!--          </div>-->
-<!--        </div>-->
+        <div class="user-login-status">
+          <div v-if="loginUserStore.loginUser.id">
+            {{ loginUserStore.loginUser.userName ?? '无名' }}
+          </div>
+          <div v-else>
+            <a-button type="primary" href="/user/login">登录</a-button>
+          </div>
+        </div>
       </a-col>
     </a-row>
   </div>
@@ -50,7 +59,7 @@
 </template>
 <script lang="ts" setup>
 import { computed, h, ref } from 'vue'
-import { HomeOutlined } from '@ant-design/icons-vue'
+import { HomeOutlined, UserOutlined, LogoutOutlined } from '@ant-design/icons-vue'
 import { type MenuProps, message } from 'ant-design-vue'
 import { useRouter } from 'vue-router'
 import { useLoginUserStore } from '@/stores/useLoginUserStore.ts'
@@ -105,6 +114,11 @@ const doMenuClick = ({ key }: { key: string }) => {
   })
 }
 
+// 跳转到个人中心
+const goToProfile = () => {
+  router.push('/user/profile')
+}
+
 // 用户注销
 const doLogout = async () => {
   const res = await userLogoutUsingPost()
@@ -118,6 +132,25 @@ const doLogout = async () => {
   } else {
     message.error('退出登录失败，' + res.data.message)
   }
+}
+
+// 获取头像URL
+const getAvatarUrl = (avatarUrl: string) => {
+  if (!avatarUrl) {
+    return '' // 默认头像将由 ant-design-vue 处理
+  }
+  
+  // 如果是完整URL，直接返回
+  if (avatarUrl.startsWith('http')) {
+    return avatarUrl
+  }
+  
+  // 如果是相对路径，添加服务器地址
+  if (avatarUrl.startsWith('/uploads/')) {
+    return `http://localhost:8123/api${avatarUrl}`
+  }
+  
+  return avatarUrl
 }
 
 </script>
