@@ -15,7 +15,7 @@ public class ThreadPoolConfig {
         int cpuCores = Runtime.getRuntime().availableProcessors();
         int corePoolSize = cpuCores * 2;       // 核心线程数：CPU核心数*2
         int maxPoolSize = corePoolSize * 2;    // 最大线程数：核心线程数*2
-        int queueCapacity = 2000;              // 缩减队列容量，避免任务堆积
+        int queueCapacity = 4000;              // 缩减队列容量，避免任务堆积
 
         return new ThreadPoolExecutor(
                 corePoolSize,
